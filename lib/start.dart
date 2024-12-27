@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:flame_audio/flame_audio.dart';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
+import 'package:shooting/parallax_image.dart';
 
 class Start extends StatefulWidget {
   const Start({super.key});
@@ -31,26 +33,28 @@ class _GameScreenState extends State<Start> with SingleTickerProviderStateMixin 
   void initState() {
     super.initState();
 
+    FlameAudio.bgm.play("space.wav");
+
     WidgetsBinding.instance.addPostFrameCallback((t) {
       screenSize = MediaQuery.of(context).size;
       size = MediaQuery.of(context).size.width.toInt();
       setState(() {});
       print("Size = ${size}");
+      // Start the game logic
+      check();
+      initiateMissile();
+      initiateBulletFire();
     });
 
     _controller = AnimationController(vsync: this, duration: Duration(microseconds: 800));
 
-    // Start the game logic
-    check();
-    initiateJet();
-    initiateMissile();
-    initiateBulletFire();
   }
 
   // Clean up the timers and other resources when objects are null
   @override
   void dispose() {
     // Cancel all active timers to prevent memory leaks
+    FlameAudio.bgm.dispose();
     missileTimer.cancel();
     bulletTimer.cancel();
     gameUpdateTimer.cancel();
@@ -66,13 +70,12 @@ class _GameScreenState extends State<Start> with SingleTickerProviderStateMixin 
     gameUpdateTimer = Timer.periodic(Duration(milliseconds: 30), (t) => updateCurrentScreen());
   }
 
-  // Jet movement and periodic updates
-  void initiateJet() {
-    Timer.periodic(Duration(milliseconds: 50), (t) => updateJetLocation());
-  }
+
 
   // Bullet firing and periodic updates
   void initiateBulletFire() {
+    fakeBullet.currentPosition =
+        Offset(shooter.currentPosition.dx + 32.5, shooter.currentPosition.dy + screenSize.height * .9);
     realBullet = Bullet(currentPosition: Offset(fakeBullet.currentPosition.dx, fakeBullet.currentPosition.dy));
     bulletTimer = Timer.periodic(Duration(milliseconds: 30), (t) => updateBulletLocation());
   }
@@ -107,6 +110,8 @@ class _GameScreenState extends State<Start> with SingleTickerProviderStateMixin 
         missile = null;
         realBullet = null;
 
+        FlameAudio.play("laser.ogg");
+
         // Reset the game state after a delay
         Timer.periodic(Duration(milliseconds: 800), (t) => update());
       }
@@ -120,13 +125,17 @@ class _GameScreenState extends State<Start> with SingleTickerProviderStateMixin 
       double y = missile!.currentPosition.dy + 15;
       missile!.currentPosition = Offset(missile!.currentPosition.dx, y);
 
+      double dX = (missile!.currentPosition.dx - shooter.currentPosition.dx);
+      double dY = (missile!.currentPosition.dy - shooter.currentPosition.dy);
+      dX *= dX;
+      dY *= dY;
+      double distance = sqrt(dX + dY);
+      if (distance <= 25) {
+        isConflicted = true;
+      }
+
       if (y + 15 > screenSize.height) {
-        double dX = (missile!.currentPosition.dx - shooter.currentPosition.dx);
-        if (dX.abs() <= 15) {
-          isConflicted = true;
-        } else {
-          missile = null; // Cleanup missile when off-screen or no longer needed
-        }
+        missile = null; // Cleanup missile when off-screen or no longer needed
       }
     } else {
       var random = Random();
@@ -152,22 +161,31 @@ class _GameScreenState extends State<Start> with SingleTickerProviderStateMixin 
   }
 
   // Jet movement
-  void updateJetLocation() {
-    if (shooter.isGoingRight) {
-      double x = shooter.currentPosition.dx + 10;
-      if (x < (screenSize.width - 70)) {
-        shooter.currentPosition = Offset(x, shooter.currentPosition.dy);
-      } else {
-        shooter.isGoingRight = false;
-      }
-    } else {
-      double x = shooter.currentPosition.dx - 10;
-      if (x > 0) {
-        shooter.currentPosition = Offset(x, shooter.currentPosition.dy);
-      } else {
-        shooter.isGoingRight = true;
-      }
+  void updateJetLocation({required Offset deltaOffset}) {
+
+    double x = shooter.currentPosition.dx + deltaOffset.dx;
+    double y = shooter.currentPosition.dy - deltaOffset.dy;
+    if (x < (screenSize.width - 70) && x > 0 && y>0 && y < (screenSize.height-70)) {
+      shooter.currentPosition = Offset(x, y);
     }
+
+
+
+    // if (shooter.isGoingRight) {
+    //   double x = shooter.currentPosition.dx + deltaOffset.dx;
+    //   if (x < (screenSize.width - 70)) {
+    //     shooter.currentPosition = Offset(x, shooter.currentPosition.dy);
+    //   } else {
+    //     shooter.isGoingRight = false;
+    //   }
+    // } else {
+    //   double x = shooter.currentPosition.dx - 10;
+    //   if (x > 0) {
+    //     shooter.currentPosition = Offset(x, shooter.currentPosition.dy);
+    //   } else {
+    //     shooter.isGoingRight = true;
+    //   }
+    // }
 
     fakeBullet.currentPosition =
         Offset(shooter.currentPosition.dx + 32.5, shooter.currentPosition.dy + screenSize.height * .9);
@@ -223,35 +241,35 @@ class _GameScreenState extends State<Start> with SingleTickerProviderStateMixin 
       )
           : Stack(
         children: [
+          ParallaxImage(imageUrl: "assets/images/world.png", speed: 20,),
           Align(
             alignment: Alignment.bottomCenter,
-            child: FractionallySizedBox(
-              heightFactor: 0.1,
-              widthFactor: 1.0,
-              child: GestureDetector(
-                onTap: () {},
-                child: Container(
-                  child: Stack(
-                    children: [
-                      Positioned(
-                        left: shooter.currentPosition.dx,
-                        top: shooter.currentPosition.dy,
-                        child: Column(
-                          children: [
-                            Container(
-                              height: 10,
-                              width: 10,
-                              decoration: BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-                            ),
-                            Icon(
-                              Icons.airplanemode_active,
-                              size: 70,
-                            ),
-                          ],
-                        ),
+            child: GestureDetector(
+              onPanUpdate: (DragUpdateDetails dragDetails){
+
+                updateJetLocation(deltaOffset: dragDetails.delta);
+              },
+              child: Container(
+                child: Stack(
+                  children: [
+                    Positioned(
+                      left: shooter.currentPosition.dx,
+                      bottom: shooter.currentPosition.dy,
+                      child: Column(
+                        children: [
+                          Container(
+                            height: 10,
+                            width: 10,
+                            decoration: BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                          ),
+                          Icon(
+                            Icons.airplanemode_active,
+                            size: 70,
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
